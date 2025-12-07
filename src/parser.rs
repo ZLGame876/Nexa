@@ -3,20 +3,23 @@ use crate::lexer::Token;
 
 // 表达式枚举：表示程序中所有可能的表达式类型
 #[derive(Debug, PartialEq)]
+#[allow(dead_code)]
 pub enum Expr {
-    // 数字字面量表达式，存储64位整数
+    // 数字字面量：i64类型整数
     Number(i64),
-    // 字符串字面量表达式，存储字符串内容
+    // 字符串字面量：String类型
     String(String),
-    // 布尔字面量表达式，存储布尔值
+    // 布尔字面量：true或false
     BoolLiteral(bool),
-    // 标识符表达式，存储变量或函数名
+    // 标识符：变量名
     Identifier(String),
     // 二元运算表达式，包含左操作数、运算符和右操作数
     // 使用Box智能指针避免递归类型导致的无限大小问题
     BinaryOp(Box<Expr>, Operator, Box<Expr>),
     // 一元运算表达式，包含运算符和操作数
     UnaryOp(Operator, Box<Expr>),
+    // 范围表达式：表示从start到end的范围
+    Range(Box<Expr>, Box<Expr>),
 }
 
 // 运算符枚举：表示程序中所有支持的运算符类型
@@ -28,7 +31,9 @@ pub enum Operator {
     Div,    // 除法运算符：/ 或 div
     Eq,     // 相等运算符：= 或 eq
     Lt,     // 小于运算符：< 或 lt
+    Le,     // 小于等于运算符：<= 或 le
     Gt,     // 大于运算符：> 或 gt
+    Ge,     // 大于等于运算符：>= 或 ge
 }
 
 // 数据类型枚举：表示支持的数据类型
@@ -55,6 +60,11 @@ pub enum Statement {
     If(Box<Expr>, Vec<Statement>, Option<Vec<Statement>>),
     // For循环语句：for 变量 in 表达式 { 语句列表 }
     For(String, Box<Expr>, Vec<Statement>),
+    // While循环语句：while 条件表达式 { 语句列表 }
+    While(Box<Expr>, Vec<Statement>),
+    // 表达式语句：独立的表达式（如函数调用、算术运算等）
+    Expression(Box<Expr>),
+
 }
 
 // 解析器结构体：用于将词法单元序列转换为抽象语法树
@@ -132,9 +142,19 @@ impl Parser {
             // 匹配括号表达式
             Some(Token::LParen) => {
                 self.advance();
-                let expr = self.parse_expression()?;
-                self.consume(Token::RParen)?;
-                Ok(expr)
+                let first_expr = self.parse_expression()?;
+                
+                // 检查是否是范围表达式 (start, end)
+                if let Some(Token::Comma) = self.current() {
+                    self.advance();
+                    let second_expr = self.parse_expression()?;
+                    self.consume(Token::RParen)?;
+                    Ok(Expr::Range(Box::new(first_expr), Box::new(second_expr)))
+                } else {
+                    // 普通括号表达式
+                    self.consume(Token::RParen)?;
+                    Ok(first_expr)
+                }
             },
             // 匹配到不期望的token
             Some(token) => {
@@ -163,8 +183,12 @@ impl Parser {
             Token::Equal | Token::Eq => Some(Operator::Eq),
             // 小于运算符：< 或 lt
             Token::LessThan | Token::Lt => Some(Operator::Lt),
+            // 小于等于运算符：<= 或 le
+            Token::LessThanOrEqual => Some(Operator::Le),
             // 大于运算符：> 或 gt
             Token::GreaterThan | Token::Gt => Some(Operator::Gt),
+            // 大于等于运算符：>= 或 ge
+            Token::GreaterThanOrEqual => Some(Operator::Ge),
             // 不是运算符
             _ => None,
         }
@@ -185,7 +209,7 @@ impl Parser {
             // 乘除法优先级为2，高于加减法
             Operator::Mul | Operator::Div => 2,
             // 比较运算符优先级最低，为0
-            Operator::Eq | Operator::Lt | Operator::Gt => 0,
+            Operator::Eq | Operator::Lt | Operator::Le | Operator::Gt | Operator::Ge => 0,
         }
     }
     
@@ -223,6 +247,13 @@ impl Parser {
     // 根据当前token的类型选择相应的解析方法
     fn parse_statement(&mut self) -> Result<Statement, String> {
         match self.current() {
+            // 处理表达式语句：直接解析表达式作为语句
+            Some(Token::Number(_)) | Some(Token::StringLiteral(_)) | Some(Token::BoolLiteral(_)) | 
+            Some(Token::LParen) | Some(Token::Plus) | Some(Token::Minus) => {
+                // 解析整个表达式
+                let expr = self.parse_expression()?;
+                Ok(Statement::Expression(Box::new(expr)))
+            },
             // 解析变量声明语句：var variable [: type] = expression
             Some(Token::Var) => {
                 // 消耗var关键字
@@ -269,18 +300,58 @@ impl Parser {
                     Err("期望标识符作为变量名".to_string())
                 }
             },
-            // 解析变量赋值语句：variable = expression
+            // 解析标识符相关语句：可能是赋值语句或表达式语句
             Some(Token::Identifier(id)) => {
                 let name = id.clone();
                 self.advance();
                 
-                // 期望等号
+                // 跳过任何缩进或换行token
+                while let Some(token) = self.current() {
+                    if matches!(token, Token::Indent | Token::Dedent | Token::Newline) {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                
+                // 检查是否是复合赋值语句 (+=, -=, *=, /= 等)
+                if let Some(op_token) = self.current() {
+                    // 检查是否是可能的复合赋值运算符前缀
+                    if matches!(op_token, Token::Plus | Token::Minus | Token::Star | Token::Slash | Token::LessThan | Token::GreaterThan) {
+                        // 保存当前运算符
+                        let op = self.get_operator(op_token).ok_or(format!("无效的运算符: {:?}", op_token))?;
+                        self.advance();
+                        
+                        // 检查下一个token是否是等号
+                        if let Some(Token::Equal) = self.current() {
+                            self.advance();
+                            let rhs = self.parse_expression()?;
+                            
+                            // 构建复合赋值的表达式: 例如 i += 1 转换为 i = i + 1
+                            let lhs = Expr::Identifier(name.clone());
+                            let combined_expr = Expr::BinaryOp(Box::new(lhs), op, Box::new(rhs));
+                            
+                            return Ok(Statement::Assign(name, Box::new(combined_expr)));
+                        } else {
+                            // 不是复合赋值，回退并解析为普通二元表达式
+                            // 构建二元运算表达式
+                            let lhs = Expr::Identifier(name);
+                            let rhs = self.parse_binary_expression(self.precedence(&op) + 1)?;
+                            let expr = Expr::BinaryOp(Box::new(lhs), op, Box::new(rhs));
+                            return Ok(Statement::Expression(Box::new(expr)));
+                        }
+                    }
+                }
+                
+                // 检查是否是简单赋值语句
                 if let Some(Token::Equal) = self.current() {
                     self.advance();
                     let expr = self.parse_expression()?;
                     Ok(Statement::Assign(name, Box::new(expr)))
                 } else {
-                    Err("期望赋值运算符 '='".to_string())
+                    // 不是赋值语句，解析为表达式语句
+                    let expr = Expr::Identifier(name);
+                    Ok(Statement::Expression(Box::new(expr)))
                 }
             },
             // 解析打印语句：print expression 或 print(expr1, expr2, ...)
@@ -321,28 +392,33 @@ impl Parser {
                     Ok(Statement::Print(Box::new(expr)))
                 }
             },
-            // 解析换行打印语句：println(expr1, expr2, ...)
+            // 解析换行打印语句：println expression 或 println(expr1, expr2, ...)
             Some(Token::Println) => {
                 // 消耗println关键字
                 self.advance();
                 
-                // 期望左括号
-                self.consume(Token::LParen)?;
-                
-                // 解析第一个表达式
-                let mut expressions = Vec::new();
-                expressions.push(self.parse_expression()?);
-                
-                // 解析逗号分隔的额外表达式
-                while let Some(Token::Comma) = self.current() {
-                    self.advance(); // 消耗逗号
+                // 检查是否有左括号（多参数语法）
+                if let Some(Token::LParen) = self.current() {
+                    // 多参数语法：println(expr1, expr2, ...)
+                    self.consume(Token::LParen)?;
+                    
+                    let mut expressions = Vec::new();
                     expressions.push(self.parse_expression()?);
+                    
+                    // 解析逗号分隔的额外表达式
+                    while let Some(Token::Comma) = self.current() {
+                        self.advance(); // 消耗逗号
+                        expressions.push(self.parse_expression()?);
+                    }
+                    
+                    self.consume(Token::RParen)?;
+                    
+                    Ok(Statement::Println(expressions))
+                } else {
+                    // 单参数语法：println expression
+                    let expr = self.parse_expression()?;
+                    Ok(Statement::Println(vec![expr]))
                 }
-                
-                // 期望右括号
-                self.consume(Token::RParen)?;
-                
-                Ok(Statement::Println(expressions))
             },
             // 解析条件语句：if condition { statements } [else { statements }] 或 if condition\n    statements（缩进风格）
             Some(Token::If) => {
@@ -364,7 +440,23 @@ impl Parser {
                             if let Token::RBrace = token {
                                 break;
                             }
-                            then_branch.push(self.parse_statement()?);
+                            
+                            // 跳过缩进相关的token
+                            while let Some(Token::Indent | Token::Dedent | Token::Newline) = self.current() {
+                                self.advance();
+                            }
+                            
+                            if let Some(token) = self.current() {
+                                if let Token::RBrace = token {
+                                    break;
+                                }
+                                then_branch.push(self.parse_statement()?);
+                                
+                                // 如果下一个token是分号，消耗它（可选的分号分隔符）
+                                while let Some(Token::Semicolon) = self.current() {
+                                    self.advance();
+                                }
+                            }
                         }
                         
                         // 期望右花括号结束then分支
@@ -396,22 +488,50 @@ impl Parser {
                         // 消耗冒号
                         self.advance();
                         
-                        // 期望换行符
-                        self.consume(Token::Newline)?;
-                        
-                        // 期望缩进
-                        self.consume(Token::Indent)?;
-                        
-                        // 解析缩进块内的语句，直到遇到dedent或else
-                        while let Some(token) = self.current() {
-                            if let Token::Dedent | Token::Else = token {
-                                break;
+                        // 处理同一行的语句（如果有）
+                        if let Some(token) = self.current() {
+                            if !matches!(token, Token::Newline) {
+                                then_branch.push(self.parse_statement()?);
+                                
+                                // 处理同一行中的多个语句（分号分隔）
+                                while let Some(Token::Semicolon) = self.current() {
+                                    self.advance();
+                                    then_branch.push(self.parse_statement()?);
+                                }
                             }
-                            then_branch.push(self.parse_statement()?);
                         }
                         
-                        // 期望取消缩进结束then分支
-                        self.consume(Token::Dedent)?;
+                        // 消耗所有连续的换行符
+                        while let Some(Token::Newline) = self.current() {
+                            self.advance();
+                        }
+                        
+                        // 检查是否有缩进开始循环体
+                        if let Some(Token::Indent) = self.current() {
+                            // 消耗所有连续的缩进token
+                            while let Some(Token::Indent) = self.current() {
+                                self.advance();
+                            }
+                            
+                            // 解析缩进块内的语句
+                            while let Some(token) = self.current() {
+                                match token {
+                                    Token::Dedent => {
+                                        // 消耗所有连续的取消缩进token
+                                        while let Some(Token::Dedent) = self.current() {
+                                            self.advance();
+                                        }
+                                        break;
+                                    },
+                                    Token::Newline => {
+                                        self.advance();
+                                    },
+                                    _ => {
+                                        then_branch.push(self.parse_statement()?);
+                                    }
+                                }
+                            }
+                        }
                     },
                     // 不支持其他语法
                     _ => return Err("期望'{'、冒号':'或缩进开始then分支".to_string()),
@@ -425,21 +545,37 @@ impl Parser {
                     // 检查else分支的代码块开始方式
                     match self.current() {
                         // Python/C#风格：使用花括号
-                        Some(Token::LBrace) => {
-                            // 消耗左花括号
-                            self.advance();
+                    Some(Token::LBrace) => {
+                        // 消耗左花括号
+                        self.advance();
+                        
+                        // 解析花括号内的语句
+                        while let Some(token) = self.current() {
+                            if let Token::RBrace = token {
+                                break;
+                            }
                             
-                            // 解析花括号内的语句
-                            while let Some(token) = self.current() {
+                            // 跳过缩进相关的token
+                            while let Some(Token::Indent | Token::Dedent | Token::Newline) = self.current() {
+                                self.advance();
+                            }
+                            
+                            if let Some(token) = self.current() {
                                 if let Token::RBrace = token {
                                     break;
                                 }
                                 else_stmts.push(self.parse_statement()?);
+                                
+                                // 如果下一个token是分号，消耗它（可选的分号分隔符）
+                                while let Some(Token::Semicolon) = self.current() {
+                                    self.advance();
+                                }
                             }
-                            
-                            // 期望右花括号结束else分支
-                            self.consume(Token::RBrace)?;
-                        },
+                        }
+                        
+                        // 期望右花括号结束else分支
+                        self.consume(Token::RBrace)?;
+                    },
                         // Python风格：使用缩进
                         Some(Token::Newline) | Some(Token::Indent) => {
                             // 消耗换行符（如果有）
@@ -504,7 +640,23 @@ impl Parser {
                             if let Token::RBrace = token {
                                 break;
                             }
-                            statements.push(self.parse_statement()?);
+                            
+                            // 跳过缩进相关的token
+                            while let Some(Token::Indent | Token::Dedent | Token::Newline) = self.current() {
+                                self.advance();
+                            }
+                            
+                            if let Some(token) = self.current() {
+                                if let Token::RBrace = token {
+                                    break;
+                                }
+                                statements.push(self.parse_statement()?);
+                                
+                                // 如果下一个token是分号，消耗它（可选的分号分隔符）
+                                while let Some(Token::Semicolon) = self.current() {
+                                    self.advance();
+                                }
+                            }
                         }
                         
                         // 期望右花括号结束循环体
@@ -539,8 +691,115 @@ impl Parser {
                         // 消耗冒号
                         self.advance();
                         
-                        // 期望换行符
-                        self.consume(Token::Newline)?;
+                        // 检查是否有换行符（支持两种语法：同一行或换行缩进）
+                        let mut statements = Vec::new();
+                        
+                        // 如果下一个token不是换行符，说明是同一行的代码块
+                        if let Some(token) = self.current() {
+                            if !matches!(token, Token::Newline) {
+                                // 同一行的代码块：while i<=10: println(i); i+1
+                                statements.push(self.parse_statement()?);
+                                
+                                // 处理同一行中的多个语句（分号分隔）
+                                while let Some(Token::Semicolon) = self.current() {
+                                    self.advance();
+                                    statements.push(self.parse_statement()?);
+                                }
+                                
+                                // 跳过同一行代码块后的所有换行符
+                                while let Some(Token::Newline) = self.current() {
+                                    self.advance();
+                                }
+                            } else {
+                                // 换行缩进的代码块：while i<=10:
+                                //     println(i)
+                                //     i+1
+                                // 消耗换行符
+                                self.advance();
+                                
+                                // 期望缩进
+                                if let Some(Token::Indent) = self.current() {
+                                    self.advance();
+                                    
+                                    // 解析缩进块内的语句，直到遇到dedent
+                        while let Some(token) = self.current() {
+                            if let Token::Dedent = token {
+                                break;
+                            }
+                            statements.push(self.parse_statement()?);
+                            
+                            // 跳过语句后的换行符
+                            while let Some(Token::Newline) = self.current() {
+                                self.advance();
+                            }
+                        }
+                                    
+                                    // 期望取消缩进结束循环体
+                                    if let Some(Token::Dedent) = self.current() {
+                                        self.advance();
+                                    }
+                                }
+                            }
+                        }
+                        
+                        statements
+                    },
+                    // 不支持其他语法
+                    _ => return Err("期望'{'、冒号':'或缩进开始循环体".to_string()),
+                };
+                
+                Ok(Statement::For(var_name, Box::new(iterable), body))
+            },
+            // 解析while循环：while condition { statements } 或 while condition\n    statements（缩进风格）
+            Some(Token::While) => {
+                // 消耗while关键字
+                self.advance();
+                
+                // 解析循环条件表达式
+                let condition = self.parse_expression()?;
+                
+                // 检查代码块开始方式：花括号或缩进
+                let body = match self.current() {
+                    // Python/C#风格：使用花括号
+                    Some(Token::LBrace) => {
+                        // 消耗左花括号
+                        self.advance();
+                        
+                        // 解析花括号内的语句
+                        let mut statements = Vec::new();
+                        while let Some(token) = self.current() {
+                            if let Token::RBrace = token {
+                                break;
+                            }
+                            
+                            // 跳过缩进相关的token
+                            while let Some(Token::Indent | Token::Dedent | Token::Newline) = self.current() {
+                                self.advance();
+                            }
+                            
+                            if let Some(token) = self.current() {
+                                if let Token::RBrace = token {
+                                    break;
+                                }
+                                statements.push(self.parse_statement()?);
+                                
+                                // 如果下一个token是分号，消耗它（可选的分号分隔符）
+                                while let Some(Token::Semicolon) = self.current() {
+                                    self.advance();
+                                }
+                            }
+                        }
+                        
+                        // 期望右花括号结束循环体
+                        self.consume(Token::RBrace)?;
+                        statements
+                    },
+                    // Python风格：使用缩进（支持冒号语法）
+                    Some(Token::Newline) | Some(Token::Indent) => {
+                        // 消耗换行符（如果有）
+                        if let Some(Token::Newline) = self.current() {
+                            self.advance();
+                        }
                         
                         // 期望缩进
                         self.consume(Token::Indent)?;
@@ -558,11 +817,65 @@ impl Parser {
                         self.consume(Token::Dedent)?;
                         statements
                     },
+                    // 冒号语法（Python风格）
+                    Some(Token::Colon) => {
+                        // 消耗冒号
+                        self.advance();
+                        
+                        let mut statements = Vec::new();
+                        
+                        // 处理同一行的语句（如果有）
+                        if let Some(token) = self.current() {
+                            if !matches!(token, Token::Newline | Token::Indent) {
+                                statements.push(self.parse_statement()?);
+                                
+                                // 处理同一行中的多个语句（分号分隔）
+                                while let Some(Token::Semicolon) = self.current() {
+                                    self.advance();
+                                    statements.push(self.parse_statement()?);
+                                }
+                            }
+                        }
+                        
+                        // 消耗所有连续的换行符
+                        while let Some(Token::Newline) = self.current() {
+                            self.advance();
+                        }
+                        
+                        // 检查是否有缩进开始循环体
+                        if let Some(Token::Indent) = self.current() {
+                            // 消耗所有连续的缩进token
+                            while let Some(Token::Indent) = self.current() {
+                                self.advance();
+                            }
+                            
+                            // 解析缩进块内的语句
+                            while let Some(token) = self.current() {
+                                match token {
+                                    Token::Dedent => {
+                                        // 消耗所有连续的取消缩进token
+                                        while let Some(Token::Dedent) = self.current() {
+                                            self.advance();
+                                        }
+                                        break;
+                                    },
+                                    Token::Newline => {
+                                        self.advance();
+                                    },
+                                    _ => {
+                                        statements.push(self.parse_statement()?);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        statements
+                    },
                     // 不支持其他语法
                     _ => return Err("期望'{'、冒号':'或缩进开始循环体".to_string()),
                 };
                 
-                Ok(Statement::For(var_name, Box::new(iterable), body))
+                Ok(Statement::While(Box::new(condition), body))
             },
             // 无法识别的语句类型
             Some(token) => {
@@ -614,9 +927,9 @@ impl Parser {
 
 // 公开的解析函数
 // 接收词法单元序列，返回解析后的语句列表或错误信息
-pub fn parse(tokens: Vec<Token>) -> Result<Vec<Statement>, String> {
-    // 创建解析器实例
-    let mut parser = Parser::new(tokens);
+pub fn parse(tokens: &Vec<Token>) -> Result<Vec<Statement>, String> {
+    // 创建解析器实例，克隆tokens以避免所有权问题
+    let mut parser = Parser::new(tokens.clone());
     // 执行解析
     parser.parse()
 }

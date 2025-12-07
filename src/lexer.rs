@@ -17,6 +17,8 @@ pub enum Token {
     // 循环语句关键字
     For,
     In,
+    // While循环关键字
+    While,
     
     // ===== 数据类型关键字 =====
     // 整数类型
@@ -41,8 +43,12 @@ pub enum Token {
     Equal,     // =
     // 小于比较运算符：<
     LessThan,  // <
+    // 小于等于比较运算符：<=
+    LessThanOrEqual, // <=
     // 大于比较运算符：>
     GreaterThan, // >
+    // 大于等于比较运算符：>=
+    GreaterThanOrEqual, // >=
     
     // ===== 关键字形式的运算符 =====
     // 加法运算（关键字形式）：add
@@ -97,6 +103,7 @@ pub enum Token {
 }
 
 // Token实现块：为Token枚举添加方法
+#[allow(dead_code)]
 impl Token {
     // 判断当前token是否为关键字
     // 返回true如果是Var, Print, Println, If, Else, Int, Float, Bool, StringType, For, In中的任意一个
@@ -110,10 +117,10 @@ impl Token {
         matches!(self, Token::BoolLiteral(_))
     }
     
-    // 判断当前token是否为运算符
-    // 返回true如果是Plus, Minus, Star, Slash, Equal, LessThan, GreaterThan中的任意一个
+    // 判断是否为运算符（符号形式）
+    // 返回true如果是Plus, Minus, Star, Slash, Equal, LessThan, LessThanOrEqual, GreaterThan, GreaterThanOrEqual中的任意一个
     pub fn is_operator(&self) -> bool {
-        matches!(self, Token::Plus | Token::Minus | Token::Star | Token::Slash | Token::Equal | Token::LessThan | Token::GreaterThan)
+        matches!(self, Token::Plus | Token::Minus | Token::Star | Token::Slash | Token::Equal | Token::LessThan | Token::LessThanOrEqual | Token::GreaterThan | Token::GreaterThanOrEqual)
     }
     
     // 判断当前token是否为关键字形式的运算符
@@ -209,9 +216,10 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                     tokens.push(Token::Newline);
                     println!("DEBUG: 生成换行token");
                     
-                    // 重置状态
+                    // 重置状态（只需要设置at_line_start为true，不需要重置current_indent）
                     at_line_start = true;
-                    current_indent = 0;
+                    
+                    println!("DEBUG: 处理Python风格冒号后换行（生成Newline token）");
                 } 
                 // 处理回车符（Windows风格换行符的一部分）
                 else if *c == '\r' {
@@ -299,25 +307,51 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
             }
             // 小于运算符匹配：遇到'<'字符
             '<' => {
-                // 打印调试信息，确认匹配到小于号
-                println!("DEBUG: 匹配小于号");
-                // 创建LessThan token并添加到结果向量
-                tokens.push(Token::LessThan);
                 // 消耗当前字符（移动到下一个字符）
                 chars.next();
                 // 位置计数器加1
                 position += 1;
+                
+                // 检查下一个字符是否为'='，如果是则匹配<=复合运算符
+                if let Some('=') = chars.peek() {
+                    // 打印调试信息，确认匹配到小于等于号
+                    println!("DEBUG: 匹配小于等于号");
+                    // 创建LessThanOrEqual token并添加到结果向量
+                    tokens.push(Token::LessThanOrEqual);
+                    // 消耗'='字符
+                    chars.next();
+                    // 位置计数器加1
+                    position += 1;
+                } else {
+                    // 打印调试信息，确认匹配到小于号
+                    println!("DEBUG: 匹配小于号");
+                    // 创建LessThan token并添加到结果向量
+                    tokens.push(Token::LessThan);
+                }
             }
             // 大于运算符匹配：遇到'>'字符
             '>' => {
-                // 打印调试信息，确认匹配到大于号
-                println!("DEBUG: 匹配大于号");
-                // 创建GreaterThan token并添加到结果向量
-                tokens.push(Token::GreaterThan);
                 // 消耗当前字符（移动到下一个字符）
                 chars.next();
                 // 位置计数器加1
                 position += 1;
+                
+                // 检查下一个字符是否为'='，如果是则匹配>=复合运算符
+                if let Some('=') = chars.peek() {
+                    // 打印调试信息，确认匹配到大于等于号
+                    println!("DEBUG: 匹配大于等于号");
+                    // 创建GreaterThanOrEqual token并添加到结果向量
+                    tokens.push(Token::GreaterThanOrEqual);
+                    // 消耗'='字符
+                    chars.next();
+                    // 位置计数器加1
+                    position += 1;
+                } else {
+                    // 打印调试信息，确认匹配到大于号
+                    println!("DEBUG: 匹配大于号");
+                    // 创建GreaterThan token并添加到结果向量
+                    tokens.push(Token::GreaterThan);
+                }
             }
             // 左括号匹配：遇到'('字符
             '(' => {
@@ -380,8 +414,8 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                 
                 if found_newline {
                     println!("DEBUG: 匹配Python风格冒号语法（冒号后有换行）");
-                    // Python风格冒号语法，我们需要生成换行token
-                    // 但我们需要先消耗掉冒号后的空白字符和换行符
+                    // Python风格冒号语法，我们需要消耗掉冒号后的空白字符和换行符
+                    // 并生成换行token，保持与正常换行处理的一致性
                     
                     // 消耗冒号后的空白字符
                     while let Some(&next_c) = chars.peek() {
@@ -393,20 +427,19 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                         }
                     }
                     
-                    // 消耗换行符
+                    // 消耗换行符并生成Newline token
                     if let Some('\n') = chars.peek() {
+                        // 生成换行token
+                        tokens.push(Token::Newline);
+                        println!("DEBUG: 生成换行token（Python风格冒号后）");
                         chars.next();
                         position += 1;
                     }
                     
-                    // 生成换行token
-                    tokens.push(Token::Newline);
-                    
-                    // 重置状态
+                    // 重置状态（只需要设置at_line_start为true，不需要重置current_indent）
                     at_line_start = true;
-                    current_indent = 0;
                     
-                    println!("DEBUG: 生成换行token（Python风格冒号后）");
+                    println!("DEBUG: 处理Python风格冒号后换行（生成Newline token）");
                 } else {
                     println!("DEBUG: 匹配普通冒号（类型注解或同一行代码块）");
                 }
@@ -715,6 +748,13 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                         println!("DEBUG: 匹配关键字 'string'");
                         // 返回StringType token
                         Token::StringType
+                    },
+                    // while循环关键字
+                    "while" => {
+                        // 打印调试信息，确认匹配到while关键字
+                        println!("DEBUG: 匹配关键字 'while'");
+                        // 返回While token
+                        Token::While
                     },
                     // for循环关键字
                     "for" => {

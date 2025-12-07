@@ -72,7 +72,9 @@ impl CodeGenerator {
                     Operator::Div => self.code.push_str("/"),
                     Operator::Eq => self.code.push_str("=="),
                     Operator::Lt => self.code.push_str("<"),
+                    Operator::Le => self.code.push_str("<="),
                     Operator::Gt => self.code.push_str(">"),
+                    Operator::Ge => self.code.push_str(">="),
                 }
                 
                 self.code.push(' ');
@@ -86,6 +88,12 @@ impl CodeGenerator {
                     _ => panic!("不支持的一元运算符: {:?}", op),
                 }
                 self.generate_expression(expr);
+            },
+            // 范围表达式：生成start..=end格式
+            Expr::Range(start, end) => {
+                self.generate_expression(&**start);
+                self.code.push_str("..=");
+                self.generate_expression(&**end);
             },
         }
     }
@@ -137,6 +145,12 @@ impl CodeGenerator {
                 self.indent();
                 self.code.push_str(name);
                 self.code.push_str(" = ");
+                self.generate_expression(expr);
+                self.code.push_str(";\n");
+            },
+            // 表达式语句：expression;
+            Statement::Expression(expr) => {
+                self.indent();
                 self.generate_expression(expr);
                 self.code.push_str(";\n");
             },
@@ -245,9 +259,30 @@ impl CodeGenerator {
             },
             // For循环：for 变量 in 表达式 then statements end
             Statement::For(var_name, iterable, body) => {
-                // 生成for循环，将字符串转换为字符迭代器
+                // 根据迭代表达式类型生成不同的循环代码
                 self.indent();
-                self.code.push_str(&format!("for {} in ({}).chars() {{\n", var_name, self.expr_to_string(iterable)));
+                self.code.push_str(&format!("for {} in ", var_name));
+                
+                match &**iterable {
+                    // 范围表达式：生成start..=end格式
+                    Expr::Range(start, end) => {
+                        self.generate_expression(&**start);
+                        self.code.push_str("..=");
+                        self.generate_expression(&**end);
+                    },
+                    // 字符串表达式：生成.chars()迭代器
+                    Expr::String(_) | Expr::Identifier(_) => {
+                        self.code.push('(');
+                        self.generate_expression(&**iterable);
+                        self.code.push_str(").chars()");
+                    },
+                    // 其他表达式：直接使用（可能需要进一步处理）
+                    _ => {
+                        self.generate_expression(&**iterable);
+                    }
+                }
+                
+                self.code.push_str(" {\n");
                 
                 // 生成循环体
                 self.increment_indent();
@@ -260,19 +295,29 @@ impl CodeGenerator {
                 self.indent();
                 self.code.push_str("}\n");
             },
+            // While循环：while condition { statements }
+            Statement::While(condition, body) => {
+                // 生成while条件
+                self.indent();
+                self.code.push_str("while ");
+                self.generate_expression(&**condition);
+                self.code.push_str(" {\n");
+                
+                // 生成循环体
+                self.increment_indent();
+                for stmt in body {
+                    self.generate_statement(stmt);
+                }
+                self.decrement_indent();
+                
+                // 结束while循环
+                self.indent();
+                self.code.push_str("}\n");
+            },
         }
     }
     
-    // 将表达式转换为字符串表示（用于for循环等场景）
-    fn expr_to_string(&self, expr: &Expr) -> String {
-        match expr {
-            Expr::Number(n) => n.to_string(),
-            Expr::String(s) => format!("\"{}\"", s),
-            Expr::BoolLiteral(b) => b.to_string(),
-            Expr::Identifier(id) => id.clone(),
-            _ => "unknown".to_string(), // 对于复杂表达式，简化处理
-        }
-    }
+
     
     // 生成完整的Rust程序
     // 接收语句列表，生成包含main函数的完整Rust代码
@@ -297,9 +342,9 @@ impl CodeGenerator {
 
 // 公开的代码生成函数
 // 接收语句列表，返回生成的Rust代码或错误
-pub fn generate(statements: Vec<Statement>) -> Result<String, String> {
+pub fn generate_code(statements: &Vec<Statement>) -> Result<String, String> {
     // 创建代码生成器实例
     let mut generator = CodeGenerator::new();
     // 执行代码生成
-    Ok(generator.generate(&statements))
+    Ok(generator.generate(statements))
 }

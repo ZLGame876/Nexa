@@ -11,3 +11,8 @@ license = "MIT"                        # 许可证
 [dependencies]
 nom = "7.0"          # 解析器组合子库，用于词法分析和语法分析
 colored = "2.0"       # 彩色控制台输出库，用于美化终端显示
+actix-web = "4.4.0"
+actix-files = "0.6.2"
+tokio = { version = "1.29.1", features = ["full"] }
+serde = { version = "1.0.193", features = ["derive"] }
+serde_json = "1.0.108"

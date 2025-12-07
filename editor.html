@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexa语言编辑器</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+        .editor-panel {
+            flex: 1;
+            padding: 20px;
+            background-color: #2d2d2d;
+            color: #f8f8f2;
+        }
+        .result-panel {
+            flex: 1;
+            padding: 20px;
+            background-color: #ffffff;
+            overflow-y: auto;
+        }
+        h1 {
+            margin-top: 0;
+            color: #61afef;
+        }
+        h2 {
+            margin-top: 0;
+            color: #333;
+        }
+        textarea {
+            width: 100%;
+            height: 70vh;
+            background-color: #1e1e1e;
+            color: #f8f8f2;
+            border: 1px solid #3e3e3e;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+            resize: none;
+            outline: none;
+        }
+        textarea:focus {
+            border-color: #61afef;
+        }
+        .button-group {
+            margin-top: 10px;
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #61afef;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #56b6c2;
+        }
+        button:active {
+            background-color: #4ecdc4;
+        }
+        .output {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .error {
+            color: #e06c75;
+        }
+        .success {
+            color: #98c379;
+        }
+        .status {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="editor-panel">
+            <h1>Nexa语言编辑器</h1>
+            <textarea id="code-editor" placeholder="在这里编写Nexa代码...">// Nexa语言示例代码
+var i = 1;
+while i < 5:
+    println(i);
+    i += 1;
+</textarea>
+            <div class="button-group">
+                <button onclick="saveCode()">保存代码</button>
+                <button onclick="runCode()">运行代码</button>
+            </div>
+            <div class="status" id="status">代码将每30秒自动保存一次</div>
+        </div>
+        <div class="result-panel">
+            <h2>执行结果</h2>
+            <div class="output" id="output">等待执行代码...</div>
+        </div>
+    </div>
+
+    <script>
+        const editor = document.getElementById('code-editor');
+        const output = document.getElementById('output');
+        const status = document.getElementById('status');
+        
+        // 定时自动保存
+        setInterval(() => {
+            saveCode();
+        }, 30000); // 30秒自动保存一次
+        
+        // 保存代码
+        async function saveCode() {
+            const code = editor.value;
+            
+            try {
+                const response = await fetch('/save', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ content: code })
+                });
+                
+                if (response.ok) {
+                    status.textContent = '代码已保存';
+                    setTimeout(() => {
+                        status.textContent = '代码将每30秒自动保存一次';
+                    }, 2000);
+                } else {
+                    status.textContent = '保存失败';
+                }
+            } catch (error) {
+                status.textContent = '保存失败: ' + error.message;
+            }
+        }
+        
+        // 运行代码
+        async function runCode() {
+            output.innerHTML = '<span class="success">正在执行代码...</span>';
+            
+            try {
+                // 先保存代码
+                await saveCode();
+                
+                const response = await fetch('/run', {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.success) {
+                        output.innerHTML = `<span class="success">执行成功！</span><br><br>生成的Rust代码：<br>${escapeHtml(result.output)}`;
+                    } else {
+                        output.innerHTML = `<span class="error">执行失败：${escapeHtml(result.error || '未知错误')}</span>`;
+                    }
+                } else {
+                    output.innerHTML = '<span class="error">执行请求失败</span>';
+                }
+            } catch (error) {
+                output.innerHTML = `<span class="error">执行错误: ${escapeHtml(error.message)}</span>`;
+            }
+        }
+        
+        // HTML转义函数
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // 页面加载时尝试读取已保存的代码
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch('/load', {
+                    method: 'GET'
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.content) {
+                        editor.value = result.content;
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load code:', error);
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+var i=1;
+var z=2;
+println(i,z)

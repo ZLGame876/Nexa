@@ -2,9 +2,12 @@
 use colored::*;
 // 导入标准库中的IO模块，用于读写操作
 use std::io::{self, Write};
-// 导入临时文件和进程执行相关库
+// 导入标准库中的文件系统模块
 use std::fs;
+// 导入标准库中的Command模块，用于执行外部命令
 use std::process::Command;
+// 导入tokio运行时
+use tokio;
 
 // 声明词法分析器模块
 mod lexer;
@@ -12,6 +15,8 @@ mod lexer;
 mod parser;
 // 声明代码生成器模块
 mod codegen;
+// 声明Web编辑器模块
+mod web_editor;
 
 // 直接测试词法分析器的函数
 // 用于快速验证词法分析器的基本功能
@@ -78,238 +83,425 @@ fn test_lexer_direct() {
     }
 }
 
-// 主函数 - 程序的入口点
-fn main() {
-    // 打印程序启动标题
-    println!("=== NEXA LANG 启动 ===");
-    // 打印版本信息，用于确认运行的代码版本
-    println!("版本: 2024-12-19 测试版");
+// 测试println函数修复的函数
+// 验证println函数的两种语法（带括号和不带括号）是否都能正确解析
+fn test_println_fix() {
+    // 打印测试标题，空行用于分隔输出
+    println!("\n=== println函数修复测试 ===");
     
-    // 立即测试最简单的词法分析
-    // 这是最关键的快速测试，验证基本功能
-    println!("\n=== 紧急测试 ===");
-    // 调用词法分析器分析"var"关键字
-    let simple_test = lexer::tokenize("var");
-    // 打印测试结果
-    println!("'var' 测试结果: {:?}", simple_test);
+    // 测试用例1: 带括号的println语法
+    let test1 = "var i=1; println(i)";
+    println!("\n测试用例1: {}", test1);
     
-    // 先直接测试词法分析器
-    // 调用详细测试函数
-    test_lexer_direct();
+    match lexer::tokenize(test1) {
+        Ok(tokens) => {
+            println!("词法分析: {:?}", tokens);
+            
+            match parser::parse(&tokens) {
+                Ok(ast) => {
+                    println!("语法分析: {:?}", ast);
+                    
+                    match codegen::generate_code(&ast) {
+                        Ok(code) => {
+                            println!("代码生成:");
+                            println!("{}", code);
+                            
+                            // 执行生成的代码
+                            match execute_rust_code(&code) {
+                                Ok(result) => println!("执行结果: {}", result),
+                                Err(e) => println!("执行错误: {}", e)
+                            }
+                        },
+                        Err(e) => {
+                            println!("代码生成错误: {}", e);
+                        }
+                    }
+                },
+                Err(e) => {
+                    println!("语法分析错误: {}", e);
+                }
+            }
+        },
+        Err(e) => {
+            println!("词法分析错误: {}", e);
+        }
+    }
     
-    // 再测试完整的词法分析器
-    // 调用标准测试函数
-    println!("\n=== 词法分析器测试 ===");
-    test_lexer();
+    // 测试用例2: 不带括号的println语法
+    let test2 = "var i=1; println i";
+    println!("\n测试用例2: {}", test2);
     
-    // 测试显式类型定义功能
-    test_explicit_types();
+    match lexer::tokenize(test2) {
+        Ok(tokens) => {
+            println!("词法分析: {:?}", tokens);
+            
+            match parser::parse(&tokens) {
+                Ok(ast) => {
+                    println!("语法分析: {:?}", ast);
+                    
+                    match codegen::generate_code(&ast) {
+                        Ok(code) => {
+                            println!("代码生成:");
+                            println!("{}", code);
+                            
+                            // 执行生成的代码
+                            match execute_rust_code(&code) {
+                                Ok(result) => println!("执行结果: {}", result),
+                                Err(e) => println!("执行错误: {}", e)
+                            }
+                        },
+                        Err(e) => {
+                            println!("代码生成错误: {}", e);
+                        }
+                    }
+                },
+                Err(e) => {
+                    println!("语法分析错误: {}", e);
+                }
+            }
+        },
+        Err(e) => {
+            println!("词法分析错误: {}", e);
+        }
+    }
+}
+
+// 测试while循环修复的函数
+// 验证修复后的while循环语法是否能正确解析
+fn test_while_loop_fix() {
+    // 打印测试标题，空行用于分隔输出
+    println!("\n=== While循环修复测试 ===");
+    // 定义包含修复后语法的测试输入
+    let test_input = "var x = 0\nwhile x < 5 :\n    print x\n    x = x + 1";
+    println!("测试输入:\n{}", test_input);
     
-    // 打印程序标题，使用绿色显示
-    println!("🌟 {} v0.1.0 🌟", "Nexa Programming Language".green());
-    // 打印分隔线，使用青色显示
-    println!("{}", "=====================================".cyan());
-    // 打印REPL模式说明，使用蓝色显示
-    println!("🔄 {}", "REPL模式 - 输入代码按回车执行".blue());
-    // 打印退出指令说明
-    println!("输入 'exit' 退出");
+    // 调用词法分析器进行测试
+    match lexer::tokenize(test_input) {
+        Ok(tokens) => {
+            // 词法分析成功
+            println!("词法分析成功: {:?}", tokens);
+            // 调用语法分析器
+            match parser::parse(&tokens) {
+                Ok(ast) => {
+                    // 语法分析成功
+                    println!("语法分析成功: {:?}", ast);
+                    // 调用代码生成器
+                    match codegen::generate_code(&ast) {
+                        Ok(code) => {
+                            // 代码生成成功
+                            println!("代码生成成功:");
+                            println!("{}", code);
+                            // 执行生成的代码
+                            match execute_rust_code(&code) {
+                                Ok(result) => {
+                                    println!("执行结果: {}", result);
+                                },
+                                Err(e) => {
+                                    println!("执行错误: {}", e);
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            println!("代码生成错误: {}", e);
+                        }
+                    }
+                },
+                Err(e) => {
+                    println!("语法分析错误: {}", e);
+                }
+            }
+        },
+        Err(e) => {
+            println!("词法分析错误: {}", e);
+        }
+    }
+}
+
+// 测试for循环修复的函数
+// 验证修复后的for循环语法是否能正确解析
+fn test_for_loop_fix() {
+    // 打印测试标题，空行用于分隔输出
+    println!("\n=== For循环修复测试 ===");
+    // 定义包含修复后语法的测试输入
+    let test_input = "for i in 0 to 5 :\n    print i";
+    println!("测试输入:\n{}", test_input);
     
-    // 主循环 - REPL的核心
+    // 调用词法分析器进行测试
+    match lexer::tokenize(test_input) {
+        Ok(tokens) => {
+            // 词法分析成功
+            println!("词法分析成功: {:?}", tokens);
+            // 调用语法分析器
+            match parser::parse(&tokens) {
+                Ok(ast) => {
+                    // 语法分析成功
+                    println!("语法分析成功: {:?}", ast);
+                    // 调用代码生成器
+                    match codegen::generate_code(&ast) {
+                        Ok(code) => {
+                            // 代码生成成功
+                            println!("代码生成成功:");
+                            println!("{}", code);
+                            // 执行生成的代码
+                            match execute_rust_code(&code) {
+                                Ok(result) => {
+                                    println!("执行结果: {}", result);
+                                },
+                                Err(e) => {
+                                    println!("执行错误: {}", e);
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            println!("代码生成错误: {}", e);
+                        }
+                    }
+                },
+                Err(e) => {
+                    println!("语法分析错误: {}", e);
+                }
+            }
+        },
+        Err(e) => {
+            println!("词法分析错误: {}", e);
+        }
+    }
+}
+
+// 运行Nexa文件的函数
+// 接收文件路径作为参数，执行文件中的Nexa代码
+fn run_file(file_path: &str) {
+    // 读取文件内容
+    match fs::read_to_string(file_path) {
+        Ok(content) => {
+            // 打印读取的文件内容
+            println!("读取文件内容:\n{}", content);
+            
+            // 调用词法分析器进行测试
+            match lexer::tokenize(&content) {
+                Ok(tokens) => {
+                    // 词法分析成功
+                    println!("词法分析成功: {:?}", tokens);
+                    // 调用语法分析器
+                    match parser::parse(&tokens) {
+                        Ok(ast) => {
+                            // 语法分析成功
+                            println!("语法分析成功: {:?}", ast);
+                            // 调用代码生成器
+                            match codegen::generate_code(&ast) {
+                                Ok(code) => {
+                                    // 代码生成成功
+                                    println!("代码生成成功:");
+                                    println!("{}", code);
+                                    // 执行生成的代码
+                                    match execute_rust_code(&code) {
+                                        Ok(result) => {
+                                            println!("执行结果: {}", result);
+                                        },
+                                        Err(e) => {
+                                            println!("执行错误: {}", e);
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("代码生成错误: {}", e);
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            println!("语法分析错误: {}", e);
+                        }
+                    }
+                },
+                Err(e) => {
+                    println!("词法分析错误: {}", e);
+                }
+            }
+        },
+        Err(e) => {
+            println!("读取文件错误: {}", e);
+        }
+    }
+}
+
+// 主函数
+// 程序的入口点
+#[tokio::main]
+async fn main() {
+    // 打印欢迎信息
+    println!("{}", "欢迎使用Nexa语言解释器 v0.1".bold().cyan());
+    println!("{}", "类型 'help' 查看可用命令，'exit' 退出程序".italic());
+    
+    // 主循环，持续接收用户输入
     loop {
-        // 打印提示符，使用黄色显示
-        print!("{}", "nexa>".yellow());
+        // 打印命令提示符
+        print!("{}", "> ".bold().green());
         // 刷新标准输出，确保提示符立即显示
         io::stdout().flush().unwrap();
         
-        // 创建字符串变量用于存储用户输入
+        // 读取用户输入
         let mut input = String::new();
-        // 从标准输入读取一行，unwrap()处理可能的错误
-        io::stdin().read_line(&mut input).unwrap();
-        
-        // 去除输入字符串两端的空白字符（包括换行符）
-        let input = input.trim();
-        
-        // 检查是否需要多行输入（以冒号结尾，类似Python）
-        let full_input = if input.ends_with(':') || (input.contains("for ") && !input.contains('{')) || (input.contains("if ") && !input.contains('{')) {
-            let mut full_input = input.to_string();
-            loop {
-                print!("{}", "... ".yellow());
-                io::stdout().flush().unwrap();
-                
-                let mut line = String::new();
-                io::stdin().read_line(&mut line).unwrap();
-                
-                // 保留所有空白字符，仅在处理空行时进行特殊处理
-                if line.trim_end().is_empty() {
-                    // 如果是空行，且已经有内容，则添加换行符后终止
-                    if !full_input.is_empty() {
-                        full_input.push('\n');
-                    }
-                    break;
-                }
-                
-                // 直接添加原始行内容（保留缩进）
-                full_input.push_str(&line);
-            }
-            full_input
-        } else {
-            input.to_string()
-        };
-        
-        // 使用完整的输入
-        let input = full_input.as_str();
-        // 检查用户是否输入了退出命令
-        if input == "exit" {
-            // 打印告别信息，使用紫色显示
-            println!("{}", "👋 再见！".purple());
-            // 跳出循环，结束程序
-            break;
-        }
-        
-        // 如果输入为空（用户只按了回车），跳过本次循环
-        if input.is_empty() {
-            continue;
-        }
-        
-        // 添加调试信息 - 用于分析输入内容
-        println!("=== 调试信息 ===");
-        // 打印原始输入字符串（带引号，便于查看边界）
-        println!("输入字符串: {:?}", input);
-        // 打印输入字符串的长度（字符数）
-        println!("输入长度: {}", input.len());
-        // 将输入字符串分解为单个字符的向量，便于分析
-        println!("输入字符: {:?}", input.chars().collect::<Vec<_>>());
-        
-        // 词法分析 - 将输入字符串转换为token序列
-        match lexer::tokenize(input) {
-            Ok(tokens) => {
-                // 词法分析成功，打印结果，使用笔记本emoji
-                println!("📝 词法分析结果: {:?}", tokens);
-                
-                // 语法分析 - 将token序列转换为抽象语法树(AST)
-                match parser::parse(tokens) {
-                    Ok(ast) => {
-                        // 语法分析成功，打印AST，使用图表emoji
-                        println!("📊 语法分析结果: {:?}", ast);
-                        
-                        // 代码生成 - 将AST转换为目标代码
-                        match codegen::generate(ast) {
-                            Ok(output) => {
-                                // 代码生成成功，打印结果，使用火箭emoji
-                                println!("🚀 代码生成结果:");
-                                // 使用绿色显示生成的代码
-                                println!("{}", output.green());
-                                
-                                // 执行生成的Rust代码
-                                match execute_rust_code(&output) {
-                                    Ok(result) => {
-                                        println!("✅ 执行结果:");
-                                        println!("--- 开始 ---");
-                                        print!("{}", result);
-                                        println!("--- 结束 ---");
-                                        println!("结果长度: {}", result.len());
-                                        println!("包含换行符: {}", result.contains('\n'));
-                                    },
-                                    Err(e) => {
-                                        println!("❌ 执行错误: {}", e.red());
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                // 代码生成失败，打印错误信息，使用红色显示
-                                println!("❌ 代码生成错误: {}", e.red());
-                            }
+        match io::stdin().read_line(&mut input) {
+            Ok(_) => {
+                // 去除输入字符串末尾的换行符
+                let input = input.trim_end();
+                // 匹配用户输入的命令
+                match input {
+                    // 退出命令
+                    "exit" => {
+                        println!("{}", "感谢使用Nexa语言解释器！".bold().cyan());
+                        break;
+                    },
+                    // 帮助命令
+                    "help" => {
+                        println!("{}", "可用命令:".bold().cyan());
+                        println!("  help     - 显示此帮助信息");
+                        println!("  exit     - 退出程序");
+                        println!("  test     - 运行内置测试");
+                        println!("  run <文件路径> - 运行指定的Nexa文件");
+                        println!("  web      - 启动Web编辑器");
+                        println!("  lexer    - 测试词法分析器");
+                        println!("  while    - 测试while循环修复");
+                        println!("  for      - 测试for循环修复");
+                        println!("  println  - 测试println函数修复");
+                    },
+                    // 测试命令
+                    "test" => {
+                        // 调用所有测试函数
+                        test_lexer_direct();
+                        test_while_loop_fix();
+                        test_for_loop_fix();
+                        test_explicit_types();
+                        test_lexer();
+                        test_println_fix();
+                    },
+                    // 词法分析器测试命令
+                    "lexer" => {
+                        test_lexer_direct();
+                    },
+                    // while循环修复测试命令
+                    "while" => {
+                        test_while_loop_fix();
+                    },
+                    // for循环修复测试命令
+                    "for" => {
+                        test_for_loop_fix();
+                    },
+                    // println函数修复测试命令
+                    "println" => {
+                        test_println_fix();
+                    },
+                    // Web编辑器命令
+                    "web" => {
+                        println!("启动Web编辑器...");
+                        // 调用Web编辑器模块的run函数，并处理结果
+                        match web_editor::run().await {
+                            Ok(_) => println!("Web编辑器已关闭"),
+                            Err(e) => println!("{} {}", "Web编辑器启动错误:".red(), e),
                         }
                     },
-                    Err(e) => {
-                        // 语法分析失败，打印错误信息，使用红色显示
-                        println!("❌ 语法分析错误: {}", e.red());
+                    // 运行文件命令
+                    cmd if cmd.starts_with("run ") => {
+                        // 提取文件路径
+                        let file_path = &cmd[4..];
+                        run_file(file_path);
+                    },
+                    // 空输入
+                    "" => continue,
+                    // 其他输入
+                    _ => {
+                        println!("{}", "未知命令，请输入 'help' 查看可用命令".red());
                     }
                 }
             },
             Err(e) => {
-                // 词法分析失败，打印错误信息，使用红色显示
-                println!("❌ 词法分析错误: {}", e.red());
-                // 标记调试信息结束
-                println!("=== 调试信息结束 ===");
+                println!("{}", format!("读取输入错误: {}", e).red());
             }
         }
     }
 }
 
-// 执行生成的Rust代码
+// 执行Rust代码的函数
+// 将生成的Rust代码写入临时文件并执行
 fn execute_rust_code(code: &str) -> Result<String, String> {
-    // 创建临时文件存储Rust代码
-    let temp_file = "/tmp/nexa_temp.rs";
-    
+    // 创建临时文件
+    let temp_file = std::env::temp_dir().join("temp.rs");
     // 写入代码到临时文件
-    if let Err(e) = fs::write(temp_file, code) {
-        return Err(format!("无法写入临时文件: {}", e));
+    match fs::write(&temp_file, code) {
+        Ok(_) => {},
+        Err(e) => {
+            return Err(format!("写入临时文件错误: {}", e));
+        }
     }
     
-    // 使用rustc编译并运行
+    // 编译临时文件
     let output = Command::new("rustc")
-        .arg(temp_file)
+        .arg(&temp_file)
         .arg("-o")
-        .arg("/tmp/nexa_temp")
+        .arg(temp_file.with_extension(""))
         .output()
-        .map_err(|e| format!("编译失败: {}", e))?;
+        .map_err(|e| format!("编译命令执行错误: {}", e))?;
     
+    // 检查编译是否成功
     if !output.status.success() {
-        let error = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(format!("编译错误:\nSTDERR: {}\nSTDOUT: {}\n生成的代码:\n{}", error, stdout, code));
+        // 编译失败，返回错误信息
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("编译错误: {}", stderr));
     }
     
-    // 运行编译后的程序
-    let run_output = Command::new("/tmp/nexa_temp")
+    // 执行编译后的程序
+    let output = Command::new(temp_file.with_extension(""))
         .output()
-        .map_err(|e| format!("运行失败: {}", e))?;
+        .map_err(|e| format!("执行命令错误: {}", e))?;
     
-    if !run_output.status.success() {
-        let error = String::from_utf8_lossy(&run_output.stderr);
-        return Err(format!("运行错误: {}", error));
+    // 检查执行是否成功
+    if output.status.success() {
+        // 执行成功，返回标准输出
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(stdout.to_string())
+    } else {
+        // 执行失败，返回错误信息
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("执行错误: {}", stderr))
     }
-    
-    // 获取标准输出并转换为字符串
-    let stdout_str = String::from_utf8_lossy(&run_output.stdout).to_string();
-    
-    // 调试信息：检查原始输出
-    eprintln!("调试 - 原始输出长度: {}", stdout_str.len());
-    eprintln!("调试 - 原始输出字节: {:?}", stdout_str.as_bytes());
-    
-    // 返回标准输出
-    Ok(stdout_str)
 }
 
-// 测试显式类型定义功能
+// 测试显式类型定义的函数
+// 验证显式类型定义是否能正确解析和生成代码
 fn test_explicit_types() {
+    // 打印测试标题，空行用于分隔输出
     println!("\n=== 显式类型定义测试 ===");
-    
-    let test_cases = [
-        "var y: String = \"ww\"",
-        "var z: Float = 42",
-        "var x: Int = 10",
-        "var b: Bool = true",
+    // 定义多种类型的测试输入
+    let test_inputs = [
+        "var x: int = 10",            // 整数类型
+        "var y: Float = 3.14",        // 浮点数类型
+        "var z: bool = true",         // 布尔类型
+        "var s: String = \"hello\"",    // 字符串类型
+        "var a: Array = [1, 2, 3]",    // 数组类型
+        "var x: int = 10; print x",   // 变量声明+打印语句
     ];
     
-    for input in &test_cases {
-        println!("\n测试输入: {}", input);
+    // 遍历所有测试输入
+    for input in &test_inputs {
+        println!("测试输入: {}", input);
         
+        // 调用词法分析器进行测试
         match lexer::tokenize(input) {
             Ok(tokens) => {
-                println!("词法分析: {:?}", tokens);
-                
-                match parser::parse(tokens) {
+                // 词法分析成功
+                println!("词法分析成功: {:?}", tokens);
+                // 调用语法分析器
+                match parser::parse(&tokens) {
                     Ok(ast) => {
-                        println!("语法分析: {:?}", ast);
-                        
-                        match codegen::generate(ast) {
+                        // 语法分析成功
+                        println!("语法分析成功: {:?}", ast);
+                        // 调用代码生成器
+                        match codegen::generate_code(&ast) {
                             Ok(code) => {
-                                println!("生成的代码:");
+                                // 代码生成成功
+                                println!("代码生成成功:");
                                 println!("{}", code);
-                                
-                                // 尝试编译生成的代码
+                                // 执行生成的代码
                                 match execute_rust_code(&code) {
                                     Ok(result) => {
                                         println!("执行结果: {}", result);

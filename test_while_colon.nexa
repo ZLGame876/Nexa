@@ -1,0 +1,11 @@
+// 测试while循环冒号语法
+var i = 1;
+while i < 5: println(i); i += 1;
+
+// 测试换行缩进的while循环
+var j = 1;
+while j < 3:
+    println(j);
+    j += 1;
+
+println("测试完成");
