@@ -94,10 +94,6 @@ pub enum Token {
     Colon,     // :
     // 分号：语句结束符
     Semicolon, // ;
-    // 缩进开始（Python风格）
-    Indent,    // 缩进
-    // 缩进结束（Python风格）
-    Dedent,    // 取消缩进
     // 换行符
     Newline,   // 换行
 }
@@ -191,12 +187,8 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
     let mut chars = input.chars().peekable();
     // 当前位置计数器，用于调试和错误报告
     let mut position = 0;
-    // 缩进栈，用于跟踪缩进级别
-    let mut indent_stack = vec![0]; // 基础缩进级别为0
-    // 当前行缩进级别
-    let mut current_indent = 0;
     // 是否在行首
-    let mut at_line_start = true;
+    let mut _at_line_start = true;
     
     // 主循环：遍历输入字符串的每个字符
     while let Some(c) = chars.peek() {
@@ -216,31 +208,17 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                     tokens.push(Token::Newline);
                     println!("DEBUG: 生成换行token");
                     
-                    // 重置状态（只需要设置at_line_start为true，不需要重置current_indent）
-                    at_line_start = true;
-                    
-                    println!("DEBUG: 处理Python风格冒号后换行（生成Newline token）");
+                    // 重置行首状态
+                    _at_line_start = true;
                 } 
                 // 处理回车符（Windows风格换行符的一部分）
                 else if *c == '\r' {
                     // 只处理回车符，不生成token
                     println!("DEBUG: 处理回车符");
                 }
-                // 处理行首的空格和制表符（用于缩进）
-                else if at_line_start {
-                    if *c == ' ' {
-                        // 每遇到一个空格，当前缩进级别加1
-                        current_indent += 1;
-                        println!("DEBUG: 空格缩进，当前缩进: {}", current_indent);
-                    } else if *c == '\t' {
-                        // 计算下一个制表位位置（向上取整到4的倍数）
-                        current_indent = (current_indent + 4) / 4 * 4;
-                        println!("DEBUG: 制表符缩进，当前缩进: {}", current_indent);
-                    }
-                }
-                // 处理非行首的空格和制表符
+                // 忽略其他空白字符（空格和制表符）
                 else {
-                    println!("DEBUG: 跳过非行首空白字符: {:?}", c);
+                    println!("DEBUG: 跳过空白字符: {:?}", c);
                 }
 
                 // 消耗当前字符（移动到下一个字符）
@@ -413,7 +391,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                 }
                 
                 if found_newline {
-                    println!("DEBUG: 匹配Python风格冒号语法（冒号后有换行）");
+
                     // Python风格冒号语法，我们需要消耗掉冒号后的空白字符和换行符
                     // 并生成换行token，保持与正常换行处理的一致性
                     
@@ -436,10 +414,10 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                         position += 1;
                     }
                     
-                    // 重置状态（只需要设置at_line_start为true，不需要重置current_indent）
-                    at_line_start = true;
+                    // 重置状态（只需要设置_at_line_start为true，不需要重置current_indent）
+                    _at_line_start = true;
                     
-                    println!("DEBUG: 处理Python风格冒号后换行（生成Newline token）");
+
                 } else {
                     println!("DEBUG: 匹配普通冒号（类型注解或同一行代码块）");
                 }
@@ -782,35 +760,8 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                 // 将创建好的token添加到结果向量中
                 tokens.push(token);
                 
-                // 如果在行首，处理缩进逻辑
-                if at_line_start {
-                    // 获取当前的基础缩进级别
-                    let base_indent = *indent_stack.last().unwrap_or(&0);
-                    
-                    // 根据缩进级别生成缩进token
-                    if current_indent > base_indent {
-                        // 增加缩进
-                        indent_stack.push(current_indent);
-                        tokens.push(Token::Indent);
-                        println!("DEBUG: 生成缩进token，级别: {}", current_indent);
-                    } else if current_indent < base_indent {
-                        // 减少缩进 - 可能需要生成多个dedent
-                        while current_indent < *indent_stack.last().unwrap_or(&0) {
-                            indent_stack.pop();
-                            tokens.push(Token::Dedent);
-                            println!("DEBUG: 生成取消缩进token，级别: {}", current_indent);
-                        }
-                        
-                        // 检查缩进是否对齐
-                        if current_indent != *indent_stack.last().unwrap_or(&0) {
-                            return Err(format!("缩进错误: 期望缩进级别 {}, 但实际是 {}", 
-                                             indent_stack.last().unwrap_or(&0), current_indent));
-                        }
-                    }
-                    
-                    // 标记不再在行首
-                    at_line_start = false;
-                }
+                // 标记不再在行首
+                _at_line_start = false;
             }
             
             // 无法识别的字符处理分支
